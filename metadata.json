@@ -1,0 +1,6 @@
+{
+  "name": "MINEARENA 2.0",
+  "description": "Local-first DPDP-ready privacy gateway for enterprise LLMs with Indian PII detection, deterministic policy enforcement, fail-closed outbound firewall, and safe local reinsertion.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

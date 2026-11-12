@@ -1,0 +1,479 @@
+MINEARENA 2.0
+PRODUCT REQUIREMENTS DOCUMENT (PRD)
+===================================
+
+Document version: 2.1
+Status: Hackathon build specification
+Project: Context-aware privacy gateway for enterprise LLMs
+Event context: Code Commit, BIET Davangere
+Original challenge: MINEARENA 1.0, PS-02 - DPDP-Ready Privacy Gateway for Enterprise LLMs
+Hackathon duration: 24 hours (this plan also includes a focused 12-hour prototype schedule)
+Primary objective: Prevent personal and confidential information from being exposed to external LLM providers while preserving useful task context.
+
+DOCUMENT PURPOSE
+----------------
+This PRD defines what MINEARENA must do, who it serves, the product scope, functional and non-functional requirements, user experience, acceptance criteria, evaluation approach, risks and hackathon priorities. It is intended to be placed in the project root and used together with TRD.txt by the development team and its AI coding assistant.
+
+The original MINEARENA 1.0 challenge requirements are retained as mandatory baseline requirements. The broader domain, format, policy and unknown-risk capabilities described as MINEARENA 2.0 are extensions. They must not be represented as already solved merely because they appear in this document.
+
+1. EXECUTIVE SUMMARY
+--------------------
+MINEARENA is a local-first privacy gateway positioned between enterprise applications and external Large Language Models (LLMs). It receives text or supported documents, extracts and normalizes content, detects personal data and enterprise-confidential information locally, classifies context and uncertainty, applies deterministic policy, replaces or transforms protected values, independently validates the exact outbound request, and calls an external LLM only when the payload passes the privacy firewall. When the LLM responds, MINEARENA validates the response and restores only authorized placeholders locally.
+
+The original challenge specifically requires local PII detection using Microsoft Presidio with India-specific recognizers, plus a local NER model or Small Language Model (SLM) for names and addresses in Indian English and code-mixed text. Mandatory Indian identifiers are Aadhaar, PAN, GSTIN, Voter ID and Passport. The solution must also demonstrate consistent tokenization, safe local reinsertion, one external LLM integration, exact outbound payload capture, a three-panel UI, approximately 50 labeled synthetic Indian documents, auditability and measurable performance.
+
+MINEARENA 2.0 extends the design toward unfamiliar industrial data by using configurable domain packs, contextual abbreviations, date parsing, multilingual hooks, document adapters, enterprise-confidentiality rules and an unknown-risk review path.
+
+PRODUCT PROMISE
+---------------
+MINEARENA aims to provide broad, measurable and extensible privacy protection with fail-closed handling of uncertain high-risk data. It does NOT promise perfect detection of every language, dialect, domain, abbreviation, OCR defect, file type or previously unseen identifier. It does NOT by itself guarantee compliance with the DPDP Act or any other law.
+
+2. PROBLEM STATEMENT
+--------------------
+Enterprises increasingly use external LLMs to summarize, classify, extract information from or reason over documents such as loan applications, KYC records, customer-support tickets, insurance claims, medical records, HR documents and internal business material.
+
+These documents can contain:
+- Personal names, aliases, addresses, phone numbers, email addresses and dates of birth.
+- Indian identity data such as Aadhaar, PAN, GSTIN, Voter ID and Passport.
+- Banking and payment details such as account numbers, IFSC, UPI IDs, card data and transaction references.
+- Healthcare identifiers and content such as ABHA, MRN, UHID, diagnoses, prescriptions, lab reports and clinical notes.
+- Customer, employee, patient, vendor, claim, policy, loan and application identifiers.
+- Digital identifiers such as IP addresses, device IDs, session IDs and location traces.
+- Enterprise confidential information such as credentials, internal financials, trade secrets, source code, customer lists and contract terms.
+
+The values may be abbreviated, misspelled, transliterated, embedded in tables, formatted differently across industries, or written in mixed languages. Sending original values directly to an external LLM can create privacy, confidentiality and security risks.
+
+MINEARENA must act as a controlled intermediary. It must detect and classify what it can, apply configured rules, and prevent the provider from receiving original protected values unless an explicit trusted policy permits that data flow.
+
+3. PRODUCT GOALS
+----------------
+G1. Implement the complete local-first Detect -> Classify -> Policy -> Mask/Tokenize -> Validate -> Forward -> Validate response -> Reinsert pipeline.
+
+G2. Satisfy every mandatory requirement from the original PS-02 challenge.
+
+G3. Demonstrate zero raw-PII leakage in the tested outbound payloads. This is a test target, not a universal guarantee.
+
+G4. Preserve task utility by retaining non-sensitive context and using policy-approved generalization or tokenization rather than indiscriminate deletion.
+
+G5. Make new entity types and domains addable through recognizers and policy packs without rewriting the whole application.
+
+G6. Maintain request-level traceability, secure mapping separation and a usable audit record.
+
+G7. Measure detection precision, recall and F1 by entity, false positives, review rate, reinsertion correctness, outbound leakage and added latency.
+
+G8. Be buildable incrementally during the hackathon with a working vertical slice prioritized over ambitious but untested features.
+
+4. NON-GOALS AND LIMITATIONS
+----------------------------
+The 24-hour hackathon prototype is not expected to:
+- Guarantee detection of every possible sensitive value or every language/dialect.
+- Provide production-grade DLP for every document, multimodal input or file type.
+- Infer lawful basis, consent, notice validity or legal compliance from document text.
+- Provide DPDP certification or guarantee legal compliance.
+- Provide production-grade multi-tenant isolation, high availability, enterprise key management or disaster recovery unless separately implemented and tested.
+- Automatically make legal decisions or replace a privacy/legal team.
+- Treat every date, number, name, address, diagnosis or organization as automatically restricted without context and policy.
+- Upload real customer, patient or mentor data to an external LLM for test purposes.
+
+5. USERS AND STAKEHOLDERS
+-------------------------
+Primary users:
+1. Enterprise application developer: integrates the gateway into an internal application that uses an LLM.
+2. Privacy/security administrator: configures entity classes, purposes, destinations, policies and risk thresholds.
+3. Operations/compliance reviewer: investigates requests and resolves uncertain high-risk detections.
+4. Hackathon evaluator: verifies detection, masking, outbound safety, reinsertion, audit and measured performance.
+
+Stakeholders:
+- Enterprise data owners and application teams.
+- Security, privacy and compliance teams.
+- End users whose personal information may appear in documents.
+- External LLM provider, which should receive only the validated sanitized request.
+
+6. CORE USER JOURNEYS
+---------------------
+Journey A - Normal safe request:
+1. User/application submits text or a supported document with task, domain and purpose metadata.
+2. Gateway extracts content and preserves source offsets/references.
+3. Local engines detect entities and classify their sensitivity.
+4. Policy engine selects actions.
+5. Sanitizer creates typed placeholders or other permitted transformations.
+6. Independent firewall scans the exact serialized request.
+7. If and only if validation passes, provider receives the sanitized request.
+8. Response validator checks placeholders and sensitive content.
+9. Local reinsertion restores only valid tokens from this request.
+10. User receives the result and a request/audit reference.
+
+Journey B - High-risk or ambiguous input:
+1. Detection produces an uncertain high-risk candidate or conflicting findings.
+2. Policy engine selects REVIEW or BLOCK.
+3. No external provider call is made while review is pending.
+4. Authorized reviewer sees minimized/sanitized context and candidate metadata.
+5. Decision and reason are recorded.
+6. The request is reprocessed under the approved policy or rejected.
+
+Journey C - Audit:
+1. Authorized operator opens a request by ID.
+2. System displays detected entity types, detector provenance, policy version/actions, outbound validation, provider/model, timestamps, latency and reinsertion status.
+3. Exact sanitized outbound payload is available to authorized auditors.
+4. Raw-to-token mappings remain in a separate protected store and are not included in ordinary audit logs.
+
+Journey D - Evaluation:
+1. Operator runs the seeded synthetic dataset.
+2. System calculates per-entity TP/FP/FN, precision, recall, F1, leakage count, false-positive rate, review rate, reinsertion accuracy and latency.
+3. Report includes dataset composition, supported-language coverage and known limitations.
+
+7. PRODUCT SCOPE AND PRIORITY
+-----------------------------
+
+7.1 P0 - Mandatory working prototype
+The following must work and be demonstrable:
+- Local detection using Microsoft Presidio and custom India-specific recognizers.
+- Aadhaar, PAN, GSTIN, Voter ID and Passport candidate recognition.
+- Local NER or SLM-assisted detection of PERSON and ADDRESS.
+- Indian English and at least one tested Indic/code-mixed demonstration path.
+- Correct entity classification with detector provenance.
+- Typed placeholders such as <PERSON_1>, <AADHAAR_1>, <PAN_1>, <GSTIN_1>, <ADDRESS_1>, <PASSPORT_1> and <VOTER_ID_1>.
+- Consistent request-scoped tokens for repeated occurrences when matching is reliable.
+- Protected local mapping between tokens and original values.
+- Local masking before any external provider call.
+- At least one configurable external LLM adapter for summarization or extraction.
+- Exact outbound payload capture and independent outbound leakage validation.
+- Fail-closed behavior: scanner failure or validation violation means no provider call.
+- Safe local reinsertion, including reordered, missing, unknown and fabricated token handling.
+- Protection against cross-person substitution.
+- Three-panel UI: original input, exact sanitized outbound payload plus findings, final restored response.
+- Approximately 50 synthetic labeled Indian documents covering KYC, loan applications, support tickets and insurance claims.
+- Metrics: outbound leakage count, per-entity precision/recall, reinsertion accuracy and added latency.
+- Audit record of entity types, exact sanitized payload, external model and request metadata.
+- Ambiguous high-risk candidates are blocked or reviewed, not silently allowed.
+
+7.2 P1 - Extensibility and robust industrial handling
+Implement if time and hardware allow:
+- Configurable domain-specific abbreviation dictionaries.
+- Multiple date, phone, address and identifier representations.
+- Unicode, whitespace and punctuation normalization with offset mapping.
+- Transliteration hooks and tested language packs.
+- Domain packs for healthcare, banking, insurance, government, education, HR and enterprise.
+- PDF, DOCX, CSV, XLSX and image/OCR adapters.
+- Human review queue and policy versioning.
+- Separate enterprise-confidential classification and policies.
+- Response-side leakage scan.
+- Local SLM fallback when external provider is unavailable.
+- Format-preserving tokenization where a real use case and safe implementation are demonstrated.
+
+7.3 P2 - Future production work
+- Production key management and rotation.
+- Robust identity and role-based access control.
+- Multi-tenant isolation and per-tenant encryption.
+- High availability, horizontal scaling and disaster recovery.
+- Broader language/domain benchmarks and continuous recognizer updates.
+- Advanced document-layout/OCR extraction and multimodal inspection.
+- Formal security assessment, penetration testing and privacy/legal review.
+
+8. DATA CATEGORIES AND CLASSIFICATION
+-------------------------------------
+The product must keep two distinct classification layers. These categories may overlap.
+
+8.1 DPDP personal data layer
+Personal data means data about an identifiable individual, subject to the Act's applicability and legal context. Candidate classes include:
+- PERSON, alias, family/contact person.
+- ADDRESS, location linked to an individual.
+- PHONE, EMAIL and emergency contact.
+- DOB, age when identifying/linkable, demographic attributes.
+- Aadhaar, PAN, GSTIN when linked to a natural person or otherwise within relevant personal-data context, Voter ID, Passport and driving-licence-like identifiers.
+- Bank account, payment and transaction data linked to an individual.
+- Patient identifiers, medical records and clinical information linked to an identifiable person.
+- Customer, employee, student, claimant and policyholder identifiers.
+- Online identifiers, IP/device/session identifiers and behavior/location data where linked to an individual.
+
+8.2 Enterprise-confidential layer
+Examples:
+- Passwords, API keys, access tokens and credentials.
+- Source code, private keys, internal system topology.
+- Trade secrets, product roadmaps, pricing strategies and internal financials.
+- Customer/vendor lists and confidential contract terms.
+- Internal incident reports and restricted business documents.
+
+Not all confidential business information is DPDP personal data. Some information may be both personal and enterprise-confidential. The policy engine must evaluate both layers.
+
+8.3 Context and caution
+A date is not automatically personal data. "Nov 10 2026" may be an event date; "DOB: Nov 10 2026" is potentially personal information. "A/C" can mean bank account or something else. A number that resembles an identifier is a candidate, not proof of validity. Use context, value shape, domain and trusted metadata. Preserve ambiguity rather than silently guessing.
+
+9. FUNCTIONAL REQUIREMENTS
+--------------------------
+
+FR-01 INPUT AND REQUEST CONTEXT
+- Accept plain text and structured request metadata.
+- Metadata may include purpose, domain, task, provider, model, language hint, application ID and tenant ID.
+- Treat client-supplied purpose, tenant and application identity as untrusted until authenticated/validated by the integration layer.
+- Enforce request size, content type and timeout limits.
+- Return a unique request ID and explicit status.
+
+FR-02 DOCUMENT EXTRACTION
+- P0: plain text and JSON.
+- P1: PDF, DOCX, CSV, XLSX and images with OCR.
+- Preserve page, row, column, field and character offsets where possible.
+- Retain OCR confidence and extraction warnings.
+- Reject unsupported or malformed files safely; never pass uninspected binary content to a provider.
+
+FR-03 NORMALIZATION WITHOUT DESTRUCTIVE REWRITING
+- Keep the original input immutable.
+- Build a normalized analysis view for Unicode normalization, whitespace, punctuation and configured spelling variants.
+- Maintain a mapping between normalized and original offsets.
+- Preserve source offsets for replacement.
+- Do not rewrite the original content merely to simplify detection.
+- Do not let normalization erase evidence or create unsafe false matches.
+
+FR-04 DETECTION ENSEMBLE
+Use multiple local detection methods:
+- Presidio and custom regex recognizers for structured identifiers.
+- Format/checksum validators where reliable.
+- NER for PERSON, ADDRESS, organization and domain entities.
+- Context and abbreviation dictionaries.
+- Optional local SLM for ambiguous context and unknown candidates.
+- Unknown-risk heuristics for identifier-like patterns.
+Merge overlapping findings deterministically and preserve detector provenance. Detector failure must be visible and must never be interpreted as "no PII found."
+
+FR-05 REQUIRED INDIAN IDENTIFIERS
+Recognize candidates for:
+- Aadhaar.
+- PAN.
+- GSTIN.
+- Voter ID.
+- Passport.
+Provide format checks and reliable validation where appropriate. A pattern match alone is not proof of a valid identifier. Use synthetic test fixtures; do not use real identity values.
+
+FR-06 BROAD AND DOMAIN-SPECIFIC ENTITIES
+Provide an extensible registry for:
+- PERSON, ADDRESS, PHONE, EMAIL, DOB and contextual dates.
+- Location and contact information.
+- Bank account, IFSC, UPI, card data and transaction references.
+- Customer, employee, vendor, loan, policy, patient, claim and student IDs.
+- ABHA, MRN, UHID and other configured healthcare identifiers.
+- Diagnoses, prescriptions, lab reports and clinical notes when linked to a person.
+- Credentials, secrets, IP and device identifiers.
+- Enterprise-confidential terms configured by an administrator.
+Entity definitions, detector versions and policies must be configurable/versioned.
+
+FR-07 ABBREVIATIONS AND SHORT FORMS
+- Support domain-scoped aliases such as DOB, Mob, A/C, IFSC, UHID, MRN, ADM_DT, CIF and PAN NO.
+- Alias matching must use nearby value shape, context and domain.
+- Ambiguous abbreviations such as CID, DM and A/C must retain ambiguity and may require review.
+- Dictionary versions must be recorded in audit metadata.
+
+FR-08 DATES AND TEMPORAL EXPRESSIONS
+- Recognize named-month dates such as "Nov 10 2026" and "10 Nov 2026", ISO dates, numeric dates, abbreviated years and configured local forms.
+- Distinguish DOB, admission date, transaction date, report date and event date where context permits.
+- Treat "10/11/2026" as ambiguous without trusted locale/context; do not silently assume day/month order.
+- Preserve the original date string and candidate interpretations.
+- A date is not automatically personal data; classify based on linkage, purpose and policy.
+
+FR-09 LANGUAGE AND CODE-MIXED INPUT
+- P0: Indian English plus at least one tested Indic/code-mixed demonstration path.
+- Design extensible language packs for Hindi, Kannada, Tamil, Telugu, Bengali, Marathi and Malayalam.
+- Support selected transliterated examples only where tested.
+- Report exactly which languages, scripts and patterns were evaluated.
+- Do not claim universal Indian-language support without test evidence.
+
+FR-10 CLASSIFICATION AND CONFIDENCE
+Each finding must carry entity type, original span, detector source, confidence, ambiguity, domain, classification, context label and recommended action. Confidence must be calibrated on labeled data; raw model scores are not automatically probabilities. Risk-based thresholds must be configurable. High-risk uncertainty triggers REVIEW or BLOCK.
+
+FR-11 DETERMINISTIC POLICY ENGINE
+Supported actions:
+- ALLOW: preserve only when explicitly permitted by policy.
+- MASK: replace with irreversible redaction.
+- TOKENIZE: replace with request-scoped placeholder.
+- GENERALIZE: preserve coarse utility (for example, an age band) only when policy permits.
+- RESTRICT: remove or transform under a restrictive rule.
+- BLOCK: stop the request.
+- REVIEW: hold for authorized human decision; no provider call while pending.
+Policy inputs include entity type, classification, domain, trusted purpose, destination/provider, confidence, tenant configuration and policy version. Policies must be deterministic and versioned.
+
+FR-12 SEPARATE PERSONAL DATA AND ENTERPRISE CONFIDENTIALITY
+Maintain separate classification namespaces and policy evaluation. A finding may trigger both. The gateway must not label all confidential business information as DPDP personal data.
+
+FR-13 CONSISTENT TOKENIZATION
+- Use typed request-scoped placeholders.
+- Repeated occurrences reuse a token only when identity matching is sufficiently reliable.
+- Do not use globally deterministic tokens by default.
+- Keep mappings in protected memory or a short-lived encrypted store.
+- Do not expose mappings in audit logs or provider payloads.
+- Tokens must be unguessable or otherwise protected against cross-request collisions.
+
+FR-14 INDEPENDENT OUTBOUND PRIVACY FIREWALL
+- Scan the exact serialized payload immediately before provider invocation.
+- Check for known original sensitive spans, structured identifiers, secrets, unresolved high-risk candidates and policy-forbidden content.
+- Include all content that will leave the boundary: user text, system prompt, metadata and tool arguments where applicable.
+- Provider adapter must accept only a validated sanitized-payload object.
+- If a scan fails, times out or detects a violation, fail closed and do not call the provider.
+- Record the exact sanitized payload and validation result.
+- Test provider non-invocation on every failure path.
+
+FR-15 EXTERNAL LLM ADAPTER
+- Integrate at least one external provider for summarization and/or extraction.
+- Use a common pluggable provider interface.
+- Configure provider, model, timeout, bounded retries and response-size limit.
+- Capture exact outbound body, provider/model, timestamp, request ID and response status.
+- Never send raw input or token mappings.
+- Disable provider-side prompt logging/training where configuration permits and disclose provider retention limitations.
+
+FR-16 RESPONSE VALIDATION AND REINSERTION
+- Parse only placeholders issued for the current request.
+- Restore exact values locally after checking token ownership and allowed context.
+- Reordered placeholders may be restored independently.
+- Dropped placeholders remain absent; do not reconstruct missing values.
+- Unknown/fabricated/modified placeholders remain literal or flagged; never fuzzy-match them.
+- Prevent cross-person substitution. If a response associates tokens with the wrong person or contradicts mapping context, do not restore automatically; flag/review.
+- Run response-side sensitive-data and policy checks before returning.
+
+FR-17 AUDIT
+Record request ID, timestamps, entity types, detector provenance, confidence/ambiguity bands, policy actions and version, exact sanitized outbound payload, provider/model, outbound validation result, response/reinsertion status and latency. Avoid raw PII in ordinary logs. Store token mappings separately with stricter access and retention controls.
+
+FR-18 HUMAN REVIEW
+- Queue uncertain/high-risk findings for authorized review.
+- Display minimized/sanitized context and candidate metadata.
+- Do not expose raw values to reviewers who do not need them.
+- Pending review means no external provider call.
+- Record reviewer identity, decision, reason and policy version.
+
+FR-19 EVALUATION AND REPORTING
+Calculate per-entity TP/FP/FN, precision, recall and F1; outbound leakage count/rate; false-positive rate; review/abstention rate; exact reinsertion accuracy; wrong-person substitution count; p50/p95 and per-stage latency. Report dataset composition, tested languages, model versions and limitations. Target zero outbound leakage on the test suite.
+
+FR-20 EXPLAINABILITY
+For each finding/action show a concise reason: detector evidence, context clue, confidence band, policy rule and final action. Explanations must not reveal secrets or unnecessary raw values.
+
+10. USER INTERFACE REQUIREMENTS
+--------------------------------
+The primary demonstration screen must contain three clearly labeled sections:
+
+A. ORIGINAL INPUT
+- Show the submitted synthetic/demo document.
+- Clearly indicate that original content is handled locally.
+- Show input format, detected language (if available), domain, purpose and task.
+- Do not send raw input to browser telemetry or third-party analytics.
+
+B. OUTBOUND SANITIZED PAYLOAD
+- Show the exact serialized text/body that passed the firewall and was sent to the provider.
+- Show detected entity types, placeholders, confidence band, detector provenance and policy action.
+- Show outbound firewall PASS/BLOCK and reason.
+- Show provider and model only if a provider call occurred.
+- A blocked request must visibly show that no provider call was made.
+
+C. FINAL RESPONSE
+- Show the provider response after local reinsertion.
+- Show warnings for missing, fabricated, duplicated or suspicious tokens.
+- Show response-side scan status and request/audit ID.
+
+Additional UI views:
+- Audit/request detail.
+- Synthetic dataset evaluation report.
+- Optional review queue.
+- Clear error, loading, blocked, pending-review and provider-failure states.
+
+11. ACCEPTANCE CRITERIA AND DEMO GATES
+--------------------------------------
+A build is accepted for the hackathon demo when:
+1. All five mandatory Indian identifier types have tests.
+2. PERSON and ADDRESS are detected using local NER plus rules.
+3. Indian English and at least one Indic/code-mixed path are demonstrated with labeled examples.
+4. Repeated values use consistent request-scoped tokens where matching is reliable.
+5. Reordering and dropping placeholders do not cause cross-person substitution.
+6. Unknown/fabricated tokens are never restored.
+7. Exact outbound payload is captured and independently scanned.
+8. Simulated scanner outage blocks provider invocation.
+9. No raw PII is present in the provider request in the test suite.
+10. At least one real provider adapter works after the firewall tests pass; mock provider mode also works offline.
+11. Approximately 50 synthetic documents run through the evaluation pipeline.
+12. Per-entity precision/recall, leakage count, reinsertion accuracy and added latency are reported.
+13. UI visibly demonstrates original input, sanitized outbound payload and restored response.
+14. No raw PII or API keys appear in ordinary logs.
+15. Known limitations and actual tested coverage are documented.
+
+12. DPDP ALIGNMENT AND LEGAL LIMITATIONS
+----------------------------------------
+MINEARENA supports technical privacy controls such as local processing, data minimization, purpose metadata, safeguards, accountability, access restrictions, retention configuration and auditability.
+
+The gateway cannot independently determine whether an organization has a valid lawful basis, provided required notices, obtained valid consent where applicable, handled data-principal rights, met retention/deletion duties or fulfilled every statutory obligation. Those questions depend on the organization, data fiduciary role, processing purpose, facts, contracts, applicable commencement provisions and rules. Maintain a versioned legal/policy registry reviewed by qualified counsel. Do not hard-code legal conclusions into a detector or claim that use of the gateway alone makes an organization DPDP-compliant.
+
+13. RISKS AND MITIGATIONS
+-------------------------
+Risk: Unknown PII is missed.
+Mitigation: Multiple local detectors, independent outbound scan, unknown-candidate heuristics, review/block for high-risk uncertainty, regression tests.
+
+Risk: False positives destroy useful context.
+Mitigation: Domain/context rules, confidence calibration, policy-based generalization, measurable false-positive rate and review.
+
+Risk: Ambiguous date is interpreted incorrectly.
+Mitigation: Preserve original text and ambiguity; use trusted locale/context or review; never silently guess.
+
+Risk: Abbreviations are ambiguous.
+Mitigation: Domain-scoped dictionaries plus nearby value shape and context.
+
+Risk: LLM alters placeholders.
+Mitigation: Current-request token allowlist, strict validation, no fuzzy substitution, response-side checks.
+
+Risk: One person's details are substituted for another's.
+Mitigation: Request-scoped token ownership and association checks; block suspicious restoration.
+
+Risk: Mapping vault is exposed.
+Mitigation: Separate store, encryption where persisted, strict access, short TTL, no provider transmission, no ordinary audit copies.
+
+Risk: Over-masking makes the LLM task useless.
+Mitigation: Purpose-aware generalization/tokenization and utility evaluation.
+
+Risk: Multilingual coverage is overstated.
+Mitigation: Publish tested language/script coverage and route unsupported/high-risk cases to review.
+
+Risk: Vibe-coded implementation bypasses security.
+Mitigation: Incremental coding, tests per milestone, manual review of security-critical code, fail-closed provider boundary and no weakening of failed security tests.
+
+Risk: Prompt injection in documents.
+Mitigation: Treat document content as untrusted input; do not let document instructions change gateway policy or authorize data transmission.
+
+14. HACKATHON BUILD PLAN
+-----------------------
+The 12-hour plan is a focused prototype plan, not a promise of production completeness.
+
+Suggested 12-hour allocation:
+- 0:00-1:00: repository, environment, FastAPI skeleton, mock provider, health endpoint.
+- 1:00-3:00: Presidio setup, custom Indian recognizers, PERSON/ADDRESS NER baseline and tests.
+- 3:00-4:00: normalization, offsets, date/abbreviation basics.
+- 4:00-5:30: deterministic masking, typed placeholders and request-scoped token vault.
+- 5:30-7:00: independent outbound firewall and fail-closed tests.
+- 7:00-8:00: provider adapter and sanitized request flow.
+- 8:00-9:00: response validation and safe reinsertion.
+- 9:00-10:00: three-panel Streamlit UI and audit display.
+- 10:00-11:00: synthetic dataset and metrics.
+- 11:00-12:00: regression/security tests, fixes and demo rehearsal.
+
+Recommended effort distribution:
+- Detection and recognition: 25%.
+- Masking and token vault: 15%.
+- Outbound firewall and security: 20%.
+- LLM integration and reinsertion: 15%.
+- Testing and evaluation: 15%.
+- UI and demo polish: 10%.
+
+First working vertical slice:
+Text input -> mandatory entity detection -> masking -> outbound firewall -> one LLM -> safe reinsertion -> three-panel UI -> audit.
+Then add abbreviations/date handling, domain packs, unknown-risk review, synthetic evaluation and document ingestion.
+
+Do not spend the first hours trying to solve universal OCR, every language or every unknown data pattern. A secure, tested end-to-end slice is the first milestone.
+
+15. DEFINITION OF DONE
+---------------------
+A working local demo accepts synthetic input, detects and explains supported entities, applies configured policy, masks/tokenizes locally, shows the exact sanitized payload, independently validates it, calls a mock or configured external LLM only after validation, validates the response, restores only valid current-request placeholders locally, shows the final output, and exports audit/evaluation results. The demo reports its tested coverage and limitations honestly.
+
+16. REFERENCES FROM THE ORIGINAL CHALLENGE
+------------------------------------------
+The original problem statement lists these references:
+- MeitY - Digital Personal Data Protection Rules, 2025:
+  https://www.meity.gov.in/documents/act-and-policies/digital-personal-data-protection-rules-2025-gDOxUjMtQWa
+- Gazette Notification G.S.R. 843(E) - Commencement Dates:
+  https://egazette.gov.in/WriteReadData/2025/267647.pdf
+- Microsoft Presidio supported entities and recognizers:
+  https://github.com/microsoft/presidio/blob/main/docs/supported_entities.md
+
+The original challenge also states that all code must be written during the 24-hour hackathon; open-source libraries, public datasets and APIs are allowed; detection and masking must operate locally; only sanitized text may be forwarded; original personal information must be reinserted locally; the seeded test dataset should contain approximately 50 synthetic Indian documents; and teams must demonstrate a working gateway rather than only slides or mock-ups.
+
+END OF PRD

@@ -1,0 +1,913 @@
+MINEARENA 2.0
+TECHNICAL REQUIREMENTS DOCUMENT (TRD)
+=====================================
+
+Document version: 2.1
+Status: Hackathon implementation specification
+Target implementation: Python 3.11+ / FastAPI / Presidio / SQLite / Streamlit or React
+Architecture style: Modular monolith with a local-first privacy boundary
+Companion document: PRD.txt
+
+DOCUMENT PURPOSE
+----------------
+This TRD defines how MINEARENA should be implemented: architecture, modules, repository layout, data contracts, processing pipeline, security controls, APIs, persistence, evaluation, tests, environment and incremental vibe-coding procedure.
+
+The mandatory baseline is the original MINEARENA PS-02 problem statement. Extensions for broad industrial data are planned as configurable modules. Do not claim a feature is implemented until code and tests demonstrate it.
+
+1. TECHNICAL ARCHITECTURE
+-------------------------
+Logical pipeline:
+
+Client / Demo UI
+    |
+    v
+FastAPI Gateway
+    |
+    +--> Request validation, authentication/context validation
+    |
+    v
+Input adapters
+    |-- Plain text
+    |-- JSON
+    |-- PDF / DOCX / CSV / XLSX (extension)
+    |-- Image OCR (extension)
+    |
+    v
+Normalization + original-offset map
+    |
+    v
+Detection orchestrator
+    |-- Presidio and custom structured recognizers
+    |-- Format/checksum validators
+    |-- Local NER
+    |-- Context and abbreviation engine
+    |-- Domain packs
+    |-- Optional local SLM
+    |-- Unknown-risk candidate detector
+    |
+    v
+Finding merge, provenance, confidence and classification
+    |
+    v
+Deterministic policy engine
+    |-- ALLOW
+    |-- MASK
+    |-- TOKENIZE
+    |-- GENERALIZE
+    |-- RESTRICT
+    |-- BLOCK
+    |-- REVIEW
+    |
+    v
+Token vault + sanitizer
+    |
+    v
+ValidatedSanitizedPayload
+    |
+    v
+Independent outbound privacy firewall
+    |-- Exact serialized payload scan
+    |-- Original-value/known-span scan
+    |-- Structured identifier and secret scan
+    |-- Unresolved high-risk check
+    |-- Policy/metadata/tool-argument check
+    |
+    +---- FAIL CLOSED: no provider call
+    |
+    v
+LLM provider adapter
+    |
+    v
+Response token validator
+    |
+    v
+Local reinsertion
+    |
+    v
+Response-side safety scan
+    |
+    v
+Calling application / UI
+
+Separate stores:
+- Audit store: sanitized payload and request metadata.
+- Protected mapping store: token-to-original mappings, encrypted/short-lived.
+- Policy registry: versioned policy definitions.
+- Synthetic dataset and evaluation outputs.
+
+CRITICAL ARCHITECTURAL INVARIANT
+--------------------------------
+The provider adapter must not be reachable with raw input. Enforce this using data types/interfaces and tests, not developer convention. The provider adapter must accept only a ValidatedSanitizedPayload object created after the outbound firewall succeeds. No code path may call the provider directly with arbitrary strings.
+
+2. RECOMMENDED TECHNOLOGY STACK
+-------------------------------
+Hackathon baseline:
+- Python 3.11 or later.
+- FastAPI for API layer.
+- Pydantic for request/response schemas and validation.
+- Uvicorn for local server.
+- Microsoft Presidio Analyzer/Anonymizer.
+- Python regex/re for custom recognizers, with bounded patterns and input lengths.
+- Custom India-specific recognizers for Aadhaar, PAN, GSTIN, Voter ID and Passport.
+- Local NER model for PERSON and ADDRESS; GLiNER or another suitable local model may be evaluated.
+- Optional local SLM only if hardware, model size, license and time permit.
+- SQLite and SQLAlchemy for hackathon MVP; PostgreSQL is a production option.
+- Streamlit for fastest three-panel demo, or React/Vite if the team already has experience.
+- Provider SDK behind a common adapter interface.
+- Pytest and HTTPX for tests.
+- Ruff for linting; mypy where feasible.
+- Docker optional.
+- .env.example and setup instructions required.
+
+Model selection rules:
+- Check model license, size, local runtime and language coverage before adoption.
+- Do not assume one NER/SLM handles all Indian languages, transliteration or industrial jargon.
+- Benchmark on the actual labeled test set.
+- SLM output is untrusted evidence. It must never authorize outbound transmission or directly perform reinsertion.
+- If a model is unavailable, continue with deterministic recognizers and stricter uncertainty policy.
+
+3. REPOSITORY LAYOUT
+--------------------
+Suggested structure:
+
+minearena/
+  README.md
+  PRD.txt
+  TRD.txt
+  .env.example
+  .gitignore
+  pyproject.toml
+  backend/
+    app/
+      main.py
+      api/
+        routes_gateway.py
+        routes_review.py
+        routes_audit.py
+        routes_metrics.py
+      core/
+        config.py
+        logging.py
+        errors.py
+        security.py
+      schemas/
+        request.py
+        finding.py
+        policy.py
+        response.py
+      pipeline/
+        orchestrator.py
+        normalize.py
+        offset_map.py
+        merge_findings.py
+        sanitize.py
+        outbound_firewall.py
+        response_validator.py
+        reinsert.py
+      detection/
+        base.py
+        presidio_engine.py
+        regex_engine.py
+        validator_engine.py
+        ner_engine.py
+        context_engine.py
+        unknown_candidate.py
+        language_id.py
+        confidence.py
+      recognizers/
+        india/
+          aadhaar.py
+          pan.py
+          gstin.py
+          voter_id.py
+          passport.py
+        common/
+          person_address.py
+          phone_email.py
+          dates.py
+          financial.py
+          clinical.py
+        domain_packs/
+          healthcare.yaml
+          banking.yaml
+          insurance.yaml
+          hr.yaml
+          government.yaml
+          enterprise.yaml
+      policies/
+        engine.py
+        purpose.py
+        registry.py
+        defaults.yaml
+        dpdp_support.yaml
+        enterprise_confidential.yaml
+      token_vault/
+        service.py
+        crypto.py
+        models.py
+      providers/
+        base.py
+        provider_one.py
+        mock_provider.py
+      documents/
+        base.py
+        text_adapter.py
+        json_adapter.py
+        pdf_adapter.py
+        docx_adapter.py
+        spreadsheet_adapter.py
+        ocr_adapter.py
+      audit/
+        service.py
+        models.py
+        repository.py
+      review/
+        service.py
+        models.py
+      evaluation/
+        dataset_loader.py
+        metrics.py
+        leakage_tests.py
+        reinsertion_tests.py
+        report.py
+      db/
+        session.py
+        models.py
+  frontend/
+    streamlit_app.py OR React/Vite application
+  data/
+    synthetic/
+    labels/
+  tests/
+    unit/
+    integration/
+    security/
+    regression/
+  scripts/
+    seed_synthetic_data.py
+    run_evaluation.py
+
+Keep the architecture modular, but do not over-engineer it into microservices during the hackathon. A modular monolith is easier to test and finish.
+
+4. CORE DATA CONTRACTS
+----------------------
+
+4.1 Gateway request
+Example JSON:
+
+{
+  "text": "Patient: Example Person; DOB: Nov 10 2026",
+  "purpose": "clinical_summary",
+  "domain": "healthcare",
+  "task": "summarize",
+  "provider": "configured_provider",
+  "language_hint": "auto",
+  "request_context": {
+    "application_id": "demo-app",
+    "policy_tenant": "demo"
+  }
+}
+
+Rules:
+- Validate maximum body size and field lengths.
+- Purpose, tenant and application identity must be authenticated/validated by the integration layer.
+- Do not trust arbitrary client-supplied claims of consent, authorization or legal basis.
+- Do not place raw input or secrets in ordinary request logs.
+
+4.2 Finding
+Example:
+
+{
+  "entity_type": "DATE_OF_BIRTH",
+  "start": 25,
+  "end": 37,
+  "detector": "context+date",
+  "confidence": 0.91,
+  "classification": ["PERSONAL_DATA"],
+  "domain": "healthcare",
+  "context_label": "DOB",
+  "ambiguity": [],
+  "recommended_action": "TOKENIZE",
+  "policy_id": "healthcare-dob-v1"
+}
+
+Finding fields:
+- entity_type
+- start and end offsets in original input
+- detector name and provenance
+- confidence or confidence band
+- classification list
+- domain and context label
+- ambiguity list
+- recommended action and policy ID/version
+- optional protected internal candidate reference
+
+Do not include raw value in ordinary logs, audit metadata or browser telemetry. Raw span may exist transiently in protected memory for replacement.
+
+4.3 Policy decision
+Example:
+
+{
+  "action": "TOKENIZE",
+  "reason": "DOB linked to an identifiable patient",
+  "policy_id": "healthcare-dob-v1",
+  "policy_version": "1",
+  "requires_review": false
+}
+
+4.4 Gateway response
+Example:
+
+{
+  "request_id": "uuid",
+  "status": "completed",
+  "sanitized_payload": "Patient: <PERSON_1>; DOB: <DATE_OF_BIRTH_1>",
+  "findings": [],
+  "outbound_validation": {"passed": true, "violations": []},
+  "provider": "configured_provider",
+  "model": "configured_model",
+  "restored_response": "...",
+  "warnings": [],
+  "latency_ms": {}
+}
+
+A blocked response must clearly identify that the provider was not called. Do not return protected mapping data.
+
+4.5 Validated sanitized payload
+Create a dedicated immutable type/class, for example:
+
+ValidatedSanitizedPayload:
+- request_id
+- exact_serialized_body
+- content_hash
+- provider
+- model
+- validation_timestamp
+- firewall_version
+- policy_version
+
+Only the outbound firewall can construct this object. Provider adapter methods accept this type, not a raw string.
+
+5. PIPELINE IMPLEMENTATION DETAILS
+----------------------------------
+
+5.1 INPUT AND EXTRACTION
+- P0 supports plain text and JSON.
+- Add PDF, DOCX, CSV, XLSX and image OCR only after the core text pipeline is stable.
+- Validate MIME type, extension, size and actual content.
+- Preserve page/row/column/field/character references.
+- Retain OCR confidence and extraction warnings.
+- Treat extracted text as untrusted.
+- Do not send unsupported binary or uninspected attachments to the provider.
+
+5.2 NORMALIZATION AND OFFSET MAPPING
+- Keep immutable original string.
+- Create normalized analysis string and bidirectional offset map.
+- Normalize Unicode to a documented form.
+- Normalize repeated whitespace and punctuation only in analysis copy.
+- Support configured spelling variants and transliteration hooks.
+- Date parser returns candidate interpretations; it does not overwrite source.
+- For 10/11/2026, preserve ambiguity unless trusted locale/context resolves it.
+- Support named month and common forms: Nov 10 2026, 10 Nov 2026, 10-Nov-26, 2026-11-10.
+- Sanitization replaces identified original spans only; it must not rewrite unrelated original text.
+
+5.3 DETECTOR INTERFACE
+Suggested interface:
+
+class Detector:
+    name: str
+    def detect(self, text: str, context: dict) -> list["Finding"]:
+        ...
+
+Each engine returns spans, entity type, confidence, provenance and metadata. Exceptions must be surfaced. Never interpret a detector crash/timeout as an empty finding list. The orchestrator must apply fail-closed or review policy for a failed critical detector.
+
+5.4 STRUCTURED RECOGNIZERS
+Implement dedicated recognizers for:
+- Aadhaar candidate pattern and applicable validation checks.
+- PAN.
+- GSTIN.
+- Voter ID.
+- Passport.
+- Phone and email.
+- Bank account, IFSC, UPI and card data where selected.
+- Configured customer, employee, patient, claim and transaction identifiers.
+
+Test valid-looking, invalid, partial, spaced, hyphenated and adversarial variants. Use synthetic fixtures. A pattern match is a candidate and must not be presented as proof that an actual identity exists.
+
+5.5 ABBREVIATION AND CONTEXT ENGINE
+Use versioned domain-scoped YAML dictionaries. Example:
+
+healthcare:
+  DOB:
+    candidates: [DATE_OF_BIRTH]
+    value_types: [date]
+  UHID:
+    candidates: [PATIENT_ID]
+    value_types: [identifier]
+  MRN:
+    candidates: [MEDICAL_RECORD_NUMBER]
+    value_types: [identifier]
+  ADM_DT:
+    candidates: [ADMISSION_DATE]
+    value_types: [date]
+
+banking:
+  A/C:
+    candidates: [BANK_ACCOUNT]
+    value_types: [account_reference]
+  UTR:
+    candidates: [TRANSACTION_REFERENCE]
+    value_types: [identifier]
+
+Alias is a contextual clue, not an unconditional label. CID, DM, A/C and similar abbreviations require domain/context/value-shape evidence. Record dictionary version in audit metadata.
+
+5.6 NER AND LOCAL SLM
+- NER proposes PERSON, ADDRESS, organization and contextual entities.
+- SLM may classify ambiguous context or propose unknown entity candidates.
+- SLM output must be structured, schema-validated and checked against original source spans.
+- Never let SLM authorize outbound transmission.
+- Never let SLM directly alter the token vault or perform reinsertion.
+- If model unavailable, use deterministic recognizers and stricter uncertainty policy.
+- Benchmark supported languages and transliteration on the actual dataset.
+
+5.7 UNKNOWN-RISK CANDIDATE DETECTOR
+Use heuristics such as:
+- Identifier-like length and character composition.
+- Nearby labels (ID, No., Ref, Account, Patient, Policy, Member, DOB).
+- Domain metadata and neighboring entity detections.
+- Repeated occurrence and structured field position.
+- Known identifier formats and partial matches.
+
+Unknown-risk detector must not classify every number as PII. It should produce a candidate with reason and risk band. High-risk uncertainty should route to REVIEW or BLOCK. It must not silently allow a suspicious candidate simply because no known recognizer matched it.
+
+5.8 FINDING MERGE AND CONFIDENCE
+- Resolve overlapping spans deterministically with explicit precedence and tie-breaking.
+- Preserve provenance from all detectors.
+- Calibrate confidence against labeled validation data; raw model scores are not automatically probabilities.
+- Configure thresholds by risk class.
+- High-risk uncertain identifier candidate => REVIEW/BLOCK.
+- Do not silently discard unresolved overlaps.
+- Keep original offsets accurate after normalization.
+
+5.9 POLICY ENGINE
+Use a pure deterministic function:
+
+decision = policy_engine.evaluate(
+    finding=finding,
+    purpose=trusted_purpose,
+    domain=domain,
+    destination=provider,
+    tenant=tenant,
+    policy_version=active_version
+)
+
+Actions:
+- ALLOW: preserve only when explicitly permitted.
+- MASK: replace with irreversible redaction.
+- TOKENIZE: request-scoped typed placeholder.
+- GENERALIZE: preserve useful coarse information only when policy permits.
+- RESTRICT: remove/transform under restrictive rule.
+- BLOCK: stop request.
+- REVIEW: queue for authorized decision; no external call while pending.
+
+Keep DPDP personal-data policy separate from enterprise-confidentiality policy. A value can trigger both. Policy configuration must be versioned and reviewed by qualified counsel; the application is not a legal decision engine.
+
+5.10 TOKEN VAULT AND SANITIZER
+- Generate unpredictable request ID and opaque token identifiers.
+- Use typed placeholders, for example <PERSON_1>, <PAN_1>, <DATE_OF_BIRTH_1>.
+- Keep token mapping scoped to one request; no global deterministic tokens by default.
+- Repeated occurrences share a token only when matching is sufficiently reliable.
+- Encrypt mapping at rest if persisted; otherwise keep in protected memory with strict TTL and cleanup where feasible.
+- Keep mapping separate from audit tables.
+- Only current-request tokens may be restored.
+- Do not fuzzy-match fabricated or modified tokens.
+- Reordered tokens may be restored independently.
+- Dropped tokens remain absent; do not hallucinate missing values.
+- If response associates tokens with wrong person or contradicts mapping context, do not restore automatically; flag/review.
+- Never send mapping or originals to provider.
+- Ensure token replacement is span-based and deterministic; do not perform unsafe repeated global replacements that can corrupt overlapping spans.
+
+5.11 OUTBOUND FIREWALL
+This is the most important security boundary.
+- Accept a ValidatedSanitizedPayload object created only by sanitizer/firewall pipeline.
+- Re-scan exact serialized body that will be sent.
+- Scan known original sensitive spans, structured identifiers, secrets, unresolved high-risk candidates and forbidden policy categories.
+- Inspect all outbound components: user content, system prompt, metadata, tool arguments and attachments where applicable.
+- Validate content hash and ensure the exact scanned bytes/body are the exact bytes/body sent.
+- If any check fails, raise a blocking error and do not invoke provider.
+- If scanner crashes or times out, fail closed.
+- Spy on provider adapter in tests and assert it was never called on violation.
+- Provider adapter must not expose a bypass method accepting raw text.
+
+5.12 PROVIDER ADAPTER
+Suggested interface:
+
+class LLMProvider:
+    def generate(self, payload: "ValidatedSanitizedPayload") -> "ProviderResult":
+        ...
+
+Requirements:
+- Provide mock provider for offline tests and demos.
+- Provide at least one real provider adapter.
+- Read API keys from environment variables or secret manager; never hard-code keys.
+- Set connection/read timeouts, bounded retries and response-size limits.
+- Do not log request headers or credentials.
+- Capture provider, model, request ID, exact sanitized outbound body, timestamp, status and latency.
+- Configure provider privacy/logging settings where available; document provider-side retention limitations.
+- Never pass mapping table or raw original values.
+
+5.13 RESPONSE VALIDATION AND REINSERTION
+- Validate provider response size and structure.
+- Parse only tokens known to the current request.
+- Unknown/fabricated tokens remain literal or are flagged.
+- Record missing, duplicated, modified and fabricated token events.
+- Reordered tokens can be restored independently.
+- Dropped tokens remain dropped.
+- Never guess missing values.
+- Check token ownership and person/entity association.
+- Run response-side sensitive-data scan before returning.
+- Local reinsertion occurs after provider response and never at the provider.
+- If response safety validation fails, return a blocked/flagged response rather than silently returning unsafe output.
+
+6. API ENDPOINTS
+----------------
+Suggested versioned endpoints:
+
+POST /api/v1/gateway/process
+- Runs full pipeline.
+- Returns request ID, findings, sanitized payload, outbound validation, provider/model, restored response, warnings and latency.
+- Must not call provider unless firewall passes.
+
+POST /api/v1/analyze
+- Local-only analysis.
+- Never calls external provider.
+- Useful for detection preview and debugging.
+
+GET /api/v1/requests/{request_id}
+- Returns authorized request/audit details.
+- Must enforce access control.
+
+GET /api/v1/metrics
+- Returns evaluation summary and dataset metadata.
+
+GET /api/v1/review
+- Returns authorized review queue.
+
+POST /api/v1/review/{item_id}/decision
+- Approve/reject with reviewer identity and reason.
+- Reprocessing must use the recorded policy version or explicitly documented updated version.
+
+GET /health
+- Health only.
+- Must not reveal secrets, API keys or sensitive configuration.
+
+Hackathon limitation: protect admin/review endpoints with a simple authentication mechanism or keep them local-only and document the limitation. Do not present this as production-grade access control.
+
+7. STORAGE MODEL
+----------------
+Suggested tables:
+
+requests
+- request_id
+- created_at / completed_at
+- purpose and domain
+- provider and model
+- status
+- latency
+- policy version
+- safe request metadata
+
+findings
+- request_id
+- entity type
+- start/end offsets
+- confidence
+- detector provenance
+- classification
+- policy action
+- ambiguity metadata
+- Do not store raw value unless a separately protected, justified design requires it.
+
+outbound_payloads
+- request_id
+- exact sanitized serialized payload
+- provider/model
+- validation result
+- content hash
+- timestamp
+
+token_mappings
+- request_id
+- token
+- encrypted original value
+- entity type
+- expiry
+- strict separate access control
+
+audit_events
+- event type
+- actor
+- timestamp
+- policy version
+- safe metadata
+
+review_items
+- sanitized context
+- candidate metadata
+- status
+- reviewer
+- decision and reason
+
+policy_versions
+- policy content/hash
+- version
+- activation metadata
+- author/reviewer metadata
+
+SQLite is adequate for a single-user demo. Do not claim multi-tenant production isolation from a basic SQLite setup. Apply retention and deletion rules to mappings and logs; keep audit payload access restricted.
+
+8. SECURITY REQUIREMENTS
+------------------------
+- .env must be ignored by Git; commit .env.example only.
+- No raw PII in console logs, tracebacks, analytics, crash reports or third-party telemetry.
+- Provider call only through the outbound firewall.
+- Strict request-scoped mapping and TTL.
+- Restrict access to original input and mapping.
+- Encrypt mapping if persisted; protect keys separately.
+- Validate file type, size and content; reject malformed files.
+- Treat document instructions as untrusted; prompt injection must not change gateway policy or authorize outbound transmission.
+- Protect against regex denial of service with bounded patterns and input sizes.
+- Use TLS when deployed beyond localhost.
+- Use least privilege for database and filesystem access.
+- Do not use live mentor/customer/patient data without explicit authorization; synthetic or masked data preferred.
+- Do not upload real PII to an external model for testing.
+- Add a security test for every code path that can invoke an external provider.
+- Ensure scanner exceptions/timeouts cause no provider invocation.
+- Do not store raw mapping in ordinary audit logs.
+- Do not claim production security from a hackathon prototype.
+
+9. EVALUATION PLAN
+------------------
+9.1 Synthetic dataset
+Create at least 50 synthetic documents with ground-truth entity spans. Cover:
+- KYC.
+- Loan applications.
+- Customer-support tickets.
+- Insurance claims.
+- Healthcare.
+- HR.
+
+Include:
+- Valid-looking and invalid identifier candidates.
+- Abbreviations and aliases.
+- Named-month, ISO and numeric date formats.
+- Ambiguous numeric dates.
+- Multilingual/code-mixed examples only in languages actually supported by selected models.
+- Misspellings, spacing changes, OCR-like corruption and missing punctuation.
+- Negative examples where similar strings are not PII.
+- Repeated entities and multiple people in one document.
+- Unseen identifier-like strings for unknown-risk detection.
+
+Never use real people's identifiers. Synthetic data must be clearly labeled and generated safely.
+
+9.2 Metrics
+- Per-entity TP, FP, FN, precision, recall and F1.
+- Outbound leakage count and leakage rate.
+- False-positive rate.
+- Review/abstention rate.
+- Reinsertion exact-match accuracy.
+- Wrong-person substitution count.
+- Added latency p50/p95 and per-stage timing.
+- Utility/task-quality comparison before and after sanitization where practical.
+
+A zero-leakage result on 50 synthetic documents is a test result, not proof of zero leakage for all industrial data.
+
+10. TEST PLAN
+-------------
+Unit tests:
+- Each recognizer and validator.
+- Date parser and ambiguity behavior.
+- Abbreviation resolver.
+- Normalization and offset mapping.
+- Finding merge and confidence.
+- Policy engine.
+- Token vault and expiry.
+- Sanitizer.
+
+Integration tests:
+- Complete pipeline with mock provider.
+- Full request from input to restored output.
+- Exact outbound payload equality between scanned and sent body.
+
+Security tests:
+- Provider is not called on scanner error/timeout.
+- Provider is not called when raw PII remains.
+- Provider is not called for unresolved high-risk candidates.
+- Provider is not called for REVIEW/BLOCK policy.
+- Unknown candidate high-risk.
+- Malformed/fabricated token.
+- Prompt injection in document content.
+- Oversized input and malicious file.
+- Secret/API key not logged.
+- Raw original values absent from outbound metadata, system prompts and tool arguments.
+
+Regression tests:
+- Every mentor-provided approved example becomes a labeled fixture after authorization and sanitization.
+- Every bug fix adds a regression test.
+- Preserve positive and negative examples.
+
+Adversarial tests:
+- Punctuation insertion.
+- Unicode confusables.
+- Separators and whitespace changes.
+- OCR errors.
+- Misspellings.
+- Nested/overlapping entities.
+- Encoded content where relevant and supported.
+- Multiple persons with similar names or identifiers.
+
+Reinsertion tests:
+- Reordered placeholders.
+- Dropped placeholders.
+- Duplicated placeholders.
+- Fabricated or modified placeholders.
+- Cross-person association.
+- Tokens from a different request.
+- Missing or expired mapping.
+
+11. ENVIRONMENT AND RUN COMMANDS
+--------------------------------
+Example .env.example:
+
+APP_ENV=development
+DATABASE_URL=sqlite:///./minearena.db
+LLM_PROVIDER=mock
+LLM_API_KEY=
+LLM_MODEL=
+TOKEN_TTL_SECONDS=1800
+OUTBOUND_FAIL_CLOSED=true
+MAX_REQUEST_BYTES=1000000
+
+Suggested setup commands (adapt to generated project):
+
+python -m venv .venv
+# Activate the virtual environment.
+pip install -e .
+uvicorn app.main:app --reload
+pytest -q
+
+Provide a mock provider mode so the complete demo works without internet or API credentials. Real provider mode must be explicitly configured. Never commit .env or API keys.
+
+12. VIBE-CODING EXECUTION PROTOCOL
+----------------------------------
+Do not ask an AI coding agent to generate the whole application in one prompt. Work in small milestones. Keep the app runnable after each milestone.
+
+Milestone 0 - Understand before coding:
+- Read PRD.txt and TRD.txt completely.
+- Ask the agent to summarize architecture, acceptance criteria, security invariants, assumptions and risks.
+- Ask it to identify any contradictions or missing information before changing files.
+
+Milestone 1 - Skeleton:
+- Create repository structure, dependency file, config, health endpoint and mock provider interface.
+- Add basic tests.
+- Do not integrate an external LLM yet.
+
+Milestone 2 - Detection:
+- Add Presidio.
+- Implement custom Indian recognizers.
+- Add PERSON/ADDRESS NER baseline.
+- Add positive and negative tests for each entity.
+- Report exact supported coverage.
+
+Milestone 3 - Normalization/context:
+- Add offset map, Unicode handling, date candidates and abbreviation dictionary.
+- Test ambiguous dates and abbreviations.
+
+Milestone 4 - Policy and token vault:
+- Implement deterministic policy engine.
+- Implement request-scoped token mapping and expiry.
+- Test repeated values, multiple people and high-risk ambiguity.
+
+Milestone 5 - Sanitizer and outbound firewall:
+- Implement span-based masking.
+- Build immutable validated payload type.
+- Independently scan exact serialized payload.
+- Prove scanner failure prevents provider invocation.
+- Do not proceed until these tests pass.
+
+Milestone 6 - Mock LLM and reinsertion:
+- Run complete pipeline using mock provider.
+- Test reordered, dropped, fabricated and cross-person tokens.
+
+Milestone 7 - Real provider:
+- Add one provider adapter only after firewall and reinsertion tests pass.
+- Confirm exact scanned payload equals exact sent payload.
+- Use synthetic input only.
+
+Milestone 8 - UI and audit:
+- Build three-panel interface.
+- Show blocked and review states.
+- Add audit request detail.
+
+Milestone 9 - Dataset and metrics:
+- Generate at least 50 synthetic documents.
+- Add labels and evaluation report.
+- Report false positives and limitations, not just success cases.
+
+Milestone 10 - Final validation:
+- Run all tests.
+- Inspect security-critical code manually.
+- Fix failures without deleting or weakening tests.
+- Rehearse the end-to-end demo.
+
+For every milestone, instruct the AI coding assistant to:
+- Inspect existing files before editing.
+- Make small, scoped changes.
+- Explain files changed and assumptions.
+- Write and run tests.
+- Report exact test results.
+- Never weaken/delete failing security tests just to make the build pass.
+- Never log raw input, PII or API keys.
+- Never bypass the outbound firewall.
+- Ask before adding large dependencies or replacing architecture.
+- Keep the project runnable after each step.
+
+13. SUGGESTED INITIAL CODING-AGENT PROMPT
+-----------------------------------------
+Read PRD.txt and TRD.txt completely. Do not start implementing the whole application yet.
+
+First:
+1. Summarize the product goals and mandatory acceptance criteria.
+2. Explain the architecture and end-to-end data flow.
+3. List the security invariants, especially the outbound firewall and token vault.
+4. List assumptions, risks, dependencies and unresolved decisions.
+5. Identify which features are P0, P1 and out of scope for the hackathon.
+
+Then create only:
+- Repository skeleton.
+- Dependency/configuration files.
+- FastAPI application and health endpoint.
+- Mock provider interface.
+- Initial unit/integration test structure.
+
+Do not implement or call an external LLM until the outbound firewall and its fail-closed tests exist. After implementation, run tests and report exact results. Do not invent completed features.
+
+14. 12-HOUR BUILD ORDER
+-----------------------
+For a focused 12-hour prototype, use this sequence:
+1. Setup and runnable skeleton.
+2. Required Indian recognizers plus PERSON/ADDRESS.
+3. Normalization and offset mapping.
+4. Masking and request-scoped token vault.
+5. Independent outbound firewall with fail-closed tests.
+6. One LLM adapter after firewall tests pass.
+7. Response validation and reinsertion.
+8. Three-panel UI and audit.
+9. Synthetic dataset, metrics and final security tests.
+
+Suggested time blocks:
+- Hour 0-1: setup.
+- Hours 1-3: detection.
+- Hours 3-4: normalization.
+- Hours 4-5.5: masking/token vault.
+- Hours 5.5-7: outbound firewall.
+- Hours 7-8: LLM adapter.
+- Hours 8-9: reinsertion.
+- Hours 9-10: UI.
+- Hours 10-11: evaluation.
+- Hours 11-12: validation and demo.
+
+Do not sacrifice the firewall or safe reinsertion to add more entity types or polish the UI. If behind schedule, reduce P1 scope rather than bypass security controls.
+
+15. DEFINITION OF DONE
+----------------------
+A working local demo:
+- Accepts synthetic input.
+- Detects and explains supported entities.
+- Applies deterministic policy.
+- Masks/tokenizes according to policy.
+- Shows the exact sanitized payload.
+- Independently validates the exact outbound body.
+- Calls mock or configured external LLM only after validation.
+- Validates the response and restores only valid current-request placeholders locally.
+- Flags missing/fabricated/suspicious tokens.
+- Shows final output.
+- Exports audit and evaluation results.
+- Documents actual tested entity/language/file coverage and limitations.
+
+16. IMPLEMENTATION NOTES AND NON-NEGOTIABLES
+--------------------------------------------
+- Build a modular monolith; avoid microservices for the hackathon.
+- Streamlit is the fastest UI path unless the team already has React experience.
+- Do not download a large model without checking size, runtime and network availability.
+- Keep a mock-provider path for offline demos.
+- Do not store raw PII in normal logs.
+- Do not send mapping data to any provider.
+- Do not allow raw text to reach provider adapter.
+- Do not treat detector failure as clean input.
+- Do not silently guess ambiguous dates or abbreviations.
+- Do not restore missing or fabricated tokens.
+- Do not claim universal detection or legal compliance.
+- Every security-critical behavior must have a test.
+
+END OF TRD
